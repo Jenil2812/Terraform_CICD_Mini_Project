@@ -1,0 +1,170 @@
+trigger:
+- dev
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Deploy
+  displayName: "Deploy Infrastructure"
+  jobs:
+  - job: TerraformApply
+    displayName: 'Terraform Apply'
+    steps:
+    - script: echo Hello, world!
+      displayName: 'Run a one-line script'
+
+    - script: |
+        echo Add other tasks to build, test, and deploy your project.
+        echo See https://aka.ms/yaml
+      displayName: 'Run a multi-line script'
+
+    - task: TerraformInstaller@1
+      displayName: 'Terraform - Install'
+      inputs:
+        terraformVersion: 'latest'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform - Check Version'
+      inputs:
+        provider: 'azurerm'
+        command: 'custom'
+        commandOptions: 'version'
+        outputTo: 'console'
+        customCommand: 'version'
+        environmentServiceNameAzureRM: 'CICD_Project_Connection'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform - Initialize'
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        backendServiceArm: 'CICD_Project_Connection'
+        backendAzureRmResourceGroupName: 'Azure_Project_RG'
+        backendAzureRmStorageAccountName: 'azureinfraproject'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'terraform.tfstate'
+
+    - task: DownloadSecureFile@1
+      name: sshPrivateKey
+      displayName: 'Download Private Key'
+      inputs:
+        secureFile: 'azure_keyb'
+
+    - task: DownloadSecureFile@1
+      name: sshPublicKey
+      displayName: 'Download Public Key'
+      inputs:
+        secureFile: 'azure_keyb.pub'
+
+    - script: |
+       mkdir -p ~/.ssh
+       cp $(Agent.TempDirectory)/azure_keyb.pub ~/.ssh/azure_keyb.pub
+       cp $(Agent.TempDirectory)/azure_keyb ~/.ssh/azure_keyb
+       chmod 640 ~/.ssh/azure_keyb.pub
+       chmod 600 ~/.ssh/azure_keyb
+      displayName: 'Setup SSH Keys'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform - Validate'
+      inputs:
+        provider: 'azurerm'
+        command: 'validate'
+
+    - script: |
+        sudo apt-get install -y dos2unix  # Install dos2unix if not available
+        dos2unix apache-install.sh        # Convert file to Unix format
+        chmod +x apache-install.sh
+    - script: ./apache-install.sh
+      displayName: 'Convert Apache Install Script to Unix Format'
+    
+    - script: |
+        if [ ! -f apache-install.sh ]; then
+        echo "apache-install.sh not found!" 
+        exit 1
+        fi
+      displayName: "Check Apache Install Script"
+    
+    - script: ./apache-install.sh
+      displayName: 'Run Apache Install Script'
+
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Plan'
+      inputs:
+        provider: 'azurerm' 
+        command: 'plan'
+        commandOptions: '-out=tfplan'
+        environmentServiceNameAzureRM: 'CICD_Project_Connection'
+        
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Apply'
+      inputs:
+        provider: 'azurerm' 
+        command: 'apply'
+        commandOptions: '-auto-approve tfplan'
+        environmentServiceNameAzureRM: 'CICD_Project_Connection'
+
+- stage: ApprovalBeforeDestroy
+  displayName: 'Approval Before Destroy'
+  dependsOn: Deploy
+  condition: succeeded()
+  jobs:
+    - job: waitForApproval
+      displayName: 'Manual Approval to Destroy'
+      pool: server
+      timeoutInMinutes: 15
+      steps:
+      - task: ManualValidation@0
+        displayName: 'Manual Approve to Destroy'
+        inputs:
+          notifyUsers: 'jenilgandhi2000@gmail.com'
+          instructions: 'Please Approve Terraform Destroy'
+          onTimeout: reject
+
+- stage: Destroy
+  displayName: 'Destroy Infra'
+  dependsOn: ApprovalBeforeDestroy
+  condition: succeeded()
+  jobs:
+    - job: TerraformDestroy
+      displayName: 'Terraform Destroy'
+      pool:
+        vmimage: ubuntu-latest
+      steps:
+      - task: TerraformTaskV4@4
+        displayName: 'Destroy Infra'
+        inputs:
+          provider: 'azurerm'
+          command: 'init'
+          backendServiceArm: 'CICD_Project_Connection'
+          backendAzureRmResourceGroupName: 'Azure_Project_RG'
+          backendAzureRmStorageAccountName: 'azureinfraproject'
+          backendAzureRmContainerName: 'tfstate'
+          backendAzureRmKey: 'terraform.tfstate'
+      - task: DownloadSecureFile@1
+        name: sshPrivateKey
+        displayName: 'Download Private Key'
+        inputs:
+          secureFile: 'azure_keyb'
+
+      - task: DownloadSecureFile@1
+        name: sshPublicKey
+        displayName: 'Download Public Key'
+        inputs:
+          secureFile: 'azure_keyb.pub'
+
+      - script: |
+          mkdir -p ~/.ssh
+          cp $(Agent.TempDirectory)/azure_keyb.pub ~/.ssh/azure_keyb.pub
+          cp $(Agent.TempDirectory)/azure_keyb ~/.ssh/azure_keyb
+          chmod 640 ~/.ssh/azure_keyb.pub
+          chmod 600 ~/.ssh/azure_keyb
+        displayName: 'Setup SSH Keys'
+      
+      - task: TerraformTaskV4@4
+        displayName: 'Terraform Destroy'
+        inputs:
+          provider: 'azurerm'
+          command: 'destroy'
+          commandOptions: '-auto-approve'
+          environmentServiceNameAzureRM: 'CICD_Project_Connection'
