@@ -3,6 +3,11 @@
 ## **Overview**
 This project demonstrates an automated **CI/CD pipeline** using **Azure DevOps** and **Terraform** to create a Linux Virtual Machine (VM) in Azure, install Apache, and implement a structured **three-stage deployment process**:
 
+
+![Image](https://github.com/user-attachments/assets/fea429a9-3863-4d6f-b2cc-8e06dcd9f39b)
+
+
+
 1. **Terraform Apply** - Creates the VM and installs Apache.
 2. **Terraform Before Destroy** - Asks for confirmation before destruction.
 3. **Terraform Destroy** - Destroys the infrastructure upon approval.
